@@ -1,0 +1,162 @@
+# Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
+name: 'SZL CI Witness'
+description: 'Append a hash-chained, offline-verifiable receipt of this CI run (JUnit-measured) and persist the chain. Failures are recorded, never hidden.'
+author: 'SZL Holdings'
+branding:
+  icon: 'check-circle'
+  color: 'gray-dark'
+
+inputs:
+  conclusion:
+    description: 'Outcome of your test step. Pass ${{ steps.<test-step-id>.outcome }} (success | failure | cancelled | skipped). Required; never guessed.'
+    required: true
+  junit-path:
+    description: 'Path to the JUnit XML your test runner wrote. Counts are read from it; a missing report can never produce a measured success.'
+    required: false
+    default: 'test-results.xml'
+  chain-path:
+    description: 'Path of the hash-chained receipt file.'
+    required: false
+    default: 'ci-witness.jsonl'
+  stream:
+    description: 'Witness stream identity. Default: <workflow>:<ref>:python-<python-version>. One chain per stream.'
+    required: false
+    default: ''
+  python-version:
+    description: 'Python used to run the witness (3.11+).'
+    required: false
+    default: '3.12'
+  setup-python:
+    description: 'Set to false if the job already set up Python.'
+    required: false
+    default: 'true'
+  witness-ref:
+    description: 'Exact szl-ci-witness commit to install. Pin to a reviewed SHA; do not use a branch name.'
+    required: false
+    default: '470673f48604046f428c4a83e2082fef245b5651'
+  token:
+    description: 'Token with actions:read, used only to restore the previous chain artifact.'
+    required: false
+    default: ${{ github.token }}
+  retention-days:
+    description: 'Artifact retention for the chain and JUnit report.'
+    required: false
+    default: '90'
+  upload:
+    description: 'Upload the chain and JUnit report as an artifact on branch runs.'
+    required: false
+    default: 'true'
+
+outputs:
+  state:
+    description: 'MEASURED (branch run, chain restored or genesis), EPHEMERAL (pull request; chain not persisted) or INVALID.'
+    value: ${{ steps.witness.outputs.state }}
+  runs:
+    description: 'Number of witnessed runs in the chain.'
+    value: ${{ steps.witness.outputs.runs }}
+  green:
+    description: 'Runs with conclusion success.'
+    value: ${{ steps.witness.outputs.green }}
+  red:
+    description: 'Runs with any other conclusion.'
+    value: ${{ steps.witness.outputs.red }}
+  regressions:
+    description: 'JSON list of run ids where a green predecessor turned red.'
+    value: ${{ steps.witness.outputs.regressions }}
+  fixes:
+    description: 'JSON list of run ids where a red predecessor turned green.'
+    value: ${{ steps.witness.outputs.fixes }}
+  terminal-hash:
+    description: 'chain_hash of the newest receipt. Archive it outside the repository for independent continuity.'
+    value: ${{ steps.witness.outputs.terminal }}
+  artifact-name:
+    description: 'Name of the uploaded chain artifact (empty on pull requests).'
+    value: ${{ steps.restore.outputs.artifact_name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      if: inputs.setup-python == 'true'
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install szl-ci-witness at the pinned commit
+      shell: bash
+      env:
+        WITNESS_REF: ${{ inputs.witness-ref }}
+      run: |
+        set -euo pipefail
+        if ! [[ "$WITNESS_REF" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::witness-ref must be a 40-char commit SHA (got '$WITNESS_REF')"; exit 1
+        fi
+        python -m pip install --quiet --disable-pip-version-check \
+          "szl-ci-witness @ git+https://github.com/szl-holdings/szl-ci-witness@${WITNESS_REF}"
+        python -c "import szl_ci_witness, sys; print('szl-ci-witness installed from', sys.argv[1])" "$WITNESS_REF"
+
+    - name: Resolve witness stream
+      id: stream
+      shell: bash
+      env:
+        IN_STREAM: ${{ inputs.stream }}
+        PYV: ${{ inputs.python-version }}
+      run: |
+        set -euo pipefail
+        if [ -n "$IN_STREAM" ]; then S="$IN_STREAM"; else S="${GITHUB_WORKFLOW}:${GITHUB_REF}:python-${PYV}"; fi
+        echo "stream=$S" >> "$GITHUB_OUTPUT"
+        echo "witness stream: $S"
+
+    - name: Restore and verify predecessor chain (branch runs only)
+      id: restore
+      if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/heads/')
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        WITNESS_STREAM: ${{ steps.stream.outputs.stream }}
+      run: |
+        set -euo pipefail
+        python -m szl_ci_witness.github_artifacts
+
+    - name: Witness this run (record from JUnit, verify, summarize)
+      id: witness
+      shell: bash
+      env:
+        TEST_CONCLUSION: ${{ inputs.conclusion }}
+        JUNIT: ${{ inputs.junit-path }}
+        CHAIN: ${{ inputs.chain-path }}
+        WITNESS_STREAM: ${{ steps.stream.outputs.stream }}
+        RESTORE_OUTCOME: ${{ steps.restore.outcome }}
+      run: |
+        set -euo pipefail
+        if [ "$RESTORE_OUTCOME" = "failure" ]; then
+          echo "::error::predecessor restore failed closed; refusing to append to an unverified chain"; exit 1
+        fi
+        python -m szl_ci_witness.witness record-junit --chain "$CHAIN" --junit "$JUNIT" --conclusion "$TEST_CONCLUSION"
+        python -m szl_ci_witness.witness verify --chain "$CHAIN"
+        python -m szl_ci_witness.witness summary --chain "$CHAIN" > witness-summary.json
+        cat witness-summary.json
+        python - "$RESTORE_OUTCOME" <<'PY'
+        import json, os, sys
+        s = json.load(open("witness-summary.json"))
+        state = s.get("state", "INVALID")
+        if state == "MEASURED" and sys.argv[1] == "skipped":
+            state = "EPHEMERAL"
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+            out.write(f"state={state}\n")
+            for k in ("runs", "green", "red", "terminal"):
+                out.write(f"{k}={s.get(k, '')}\n")
+            for k in ("regressions", "fixes"):
+                out.write(f"{k}={json.dumps(s.get(k, []))}\n")
+        PY
+
+    - name: Persist chain and JUnit report
+      if: inputs.upload == 'true' && steps.restore.outcome == 'success'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ steps.restore.outputs.artifact_name }}
+        path: |
+          ${{ inputs.chain-path }}
+          ${{ inputs.junit-path }}
+        if-no-files-found: error
+        retention-days: ${{ inputs.retention-days }}

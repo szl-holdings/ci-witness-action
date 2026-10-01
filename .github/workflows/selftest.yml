@@ -1,0 +1,56 @@
+# Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
+name: selftest
+# Exercises the action on itself: measured JUnit -> witness -> chain artifact (branch runs).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ci-witness-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  witness:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet pytest pyyaml
+
+      - name: Test
+        id: test
+        run: python -m pytest tests/ -q --junitxml=test-results.xml
+
+      - name: Witness this run (the action under test)
+        if: always()
+        id: witness
+        uses: ./
+        with:
+          conclusion: ${{ steps.test.outcome }}
+          junit-path: test-results.xml
+          setup-python: "false"
+
+      - name: Assert outputs are measured, not asserted
+        if: always()
+        env:
+          STATE: ${{ steps.witness.outputs.state }}
+          RUNS: ${{ steps.witness.outputs.runs }}
+          TERMINAL: ${{ steps.witness.outputs.terminal-hash }}
+          ARTIFACT: ${{ steps.witness.outputs.artifact-name }}
+        run: |
+          set -euo pipefail
+          echo "state=$STATE runs=$RUNS terminal=$TERMINAL artifact=$ARTIFACT"
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) [ "$STATE" = "EPHEMERAL" ] ;;
+            *)            [ "$STATE" = "MEASURED" ] && [ -n "$ARTIFACT" ] ;;
+          esac
+          [ "${#TERMINAL}" -eq 64 ]
+          [ "$RUNS" -ge 1 ]

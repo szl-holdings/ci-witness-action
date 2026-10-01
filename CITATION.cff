@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this action, cite the receipt chain it produces, not this file."
+title: "SZL CI Witness — GitHub Action"
+type: software
+authors:
+  - family-names: Lutar
+    given-names: Stephen
+    orcid: "https://orcid.org/0009-0001-0110-4173"
+    affiliation: SZL Holdings
+license: Apache-2.0
+repository-code: "https://github.com/szl-holdings/ci-witness-action"
+url: "https://a11oy.net"
+version: 0.1.0
+date-released: 2026-10-01
