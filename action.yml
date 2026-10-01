@@ -8,7 +8,7 @@ branding:
 
 inputs:
   conclusion:
-    description: 'Outcome of your test step. Pass ${{ steps.<test-step-id>.outcome }} (success | failure | cancelled | skipped). Required; never guessed.'
+    description: 'Outcome of your test step: pass the outcome of the step id that ran the tests (success | failure | cancelled | skipped). Required; never guessed.'
     required: true
   junit-path:
     description: 'Path to the JUnit XML your test runner wrote. Counts are read from it; a missing report can never produce a measured success.'
