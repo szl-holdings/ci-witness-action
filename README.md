@@ -77,6 +77,13 @@ failing JUnit report fails the witness step on purpose.
 | `retention-days` | `90` | artifact retention |
 | `upload` | `true` | persist chain + report on branch runs |
 
+`chain-path` is used for both predecessor restoration and the current append.
+The uploaded artifact always contains `ci-witness.jsonl` at its root, plus
+`test-results.xml` when the report exists. These stable archive names preserve
+the pinned restore contract when working files have custom names or directories.
+An existing destination is never overwritten, and an invalid predecessor still
+fails closed before a new record can be appended.
+
 ## Outputs
 
 `state` (`MEASURED`, `EPHEMERAL` on pull requests, or `INVALID`), `runs`, `green`, `red`,

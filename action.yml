@@ -114,9 +114,10 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
         WITNESS_STREAM: ${{ steps.stream.outputs.stream }}
+        CHAIN: ${{ inputs.chain-path }}
       run: |
         set -euo pipefail
-        python -m szl_ci_witness.github_artifacts
+        python "$GITHUB_ACTION_PATH/scripts/chain_artifact.py" restore
 
     - name: Witness this run (record from JUnit, verify, summarize)
       id: witness
@@ -150,13 +151,22 @@ runs:
                 out.write(f"{k}={json.dumps(s.get(k, []))}\n")
         PY
 
+    - name: Stage the canonical predecessor archive
+      id: stage
+      if: inputs.upload == 'true' && steps.restore.outcome == 'success'
+      shell: bash
+      env:
+        CHAIN: ${{ inputs.chain-path }}
+        JUNIT: ${{ inputs.junit-path }}
+      run: |
+        set -euo pipefail
+        python "$GITHUB_ACTION_PATH/scripts/chain_artifact.py" stage
+
     - name: Persist chain and JUnit report
       if: inputs.upload == 'true' && steps.restore.outcome == 'success'
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: ${{ steps.restore.outputs.artifact_name }}
-        path: |
-          ${{ inputs.chain-path }}
-          ${{ inputs.junit-path }}
+        path: ${{ steps.stage.outputs.directory }}
         if-no-files-found: error
         retention-days: ${{ inputs.retention-days }}

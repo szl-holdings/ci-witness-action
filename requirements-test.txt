@@ -1,0 +1,4 @@
+pytest
+pyyaml
+# Match the action's immutable witness-ref so persistence tests use that API.
+szl-ci-witness @ git+https://github.com/szl-holdings/szl-ci-witness@470673f48604046f428c4a83e2082fef245b5651
