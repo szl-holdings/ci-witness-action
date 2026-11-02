@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -27,12 +28,20 @@ def _reject_nonfinite_constant(_: str) -> None:
     raise ValueError("witness chain contains a non-finite JSON number")
 
 
+def _parse_finite_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("witness chain contains a non-finite JSON number")
+    return number
+
+
 def _load_chain_records(content: bytes) -> list[dict]:
     return [
         json.loads(
             line,
             object_pairs_hook=_unique_object,
             parse_constant=_reject_nonfinite_constant,
+            parse_float=_parse_finite_float,
         )
         for line in content.decode("utf-8").splitlines()
         if line.strip()
@@ -99,3 +108,4 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+
