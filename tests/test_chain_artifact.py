@@ -11,7 +11,13 @@ import pytest
 import yaml
 
 from szl_ci_witness.github_artifacts import artifact_prefix
-from szl_ci_witness.witness import load_chain, main as witness_main, verify_witness_chain, witness_summary
+from szl_ci_witness.witness import (
+    load_chain,
+    main as witness_main,
+    verify_witness_chain,
+    witness_record,
+    witness_summary,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -134,6 +140,76 @@ def test_stage_rejects_tampered_chain(runner):
     assert not list(runner.glob("ci-witness-artifact-*"))
 
 
+@pytest.mark.parametrize(
+    ("key", "shadow"),
+    [("run_id", "shadowed"), ("passed", 999)],
+    ids=("top-level", "nested"),
+)
+def test_stage_rejects_duplicate_json_object_keys(runner, key, shadow):
+    chain = runner / "ambiguous.jsonl"
+    missing = runner / "missing.xml"
+    record(chain, missing, "failure")
+    original = load_chain(str(chain))[0]
+    raw = json.dumps(original, sort_keys=True)
+    marker = json.dumps(key) + ":"
+    assert marker in raw
+    ambiguous = raw.replace(
+        marker,
+        json.dumps(key) + ":" + json.dumps(shadow) + "," + marker,
+        1,
+    )
+    # Python's default decoder silently keeps the last duplicate value.
+    assert json.loads(ambiguous) == original
+    chain.write_text(ambiguous + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="duplicate JSON object keys"):
+        artifact.stage_artifact(str(chain), str(missing), str(runner))
+    assert not list(runner.glob("ci-witness-artifact-*"))
+
+
+@pytest.mark.parametrize("constant", ("NaN", "Infinity", "-Infinity"))
+def test_stage_rejects_nonfinite_json_constants(runner, constant):
+    chain = runner / "nonfinite.jsonl"
+    missing = runner / "missing.xml"
+    record(chain, missing, "failure")
+    original = load_chain(str(chain))[0]
+    raw = json.dumps(original, sort_keys=True)
+    marker = '"run_id":'
+    assert marker in raw
+    ambiguous = raw.replace(marker, marker + constant + "," + marker, 1)
+    # The default decoder accepts the non-standard token and the later key wins.
+    assert json.loads(ambiguous) == original
+    chain.write_text(ambiguous + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="non-finite JSON number"):
+        artifact.stage_artifact(str(chain), str(missing), str(runner))
+    assert not list(runner.glob("ci-witness-artifact-*"))
+
+
+def test_stage_rejects_recomputed_finite_syntax_numeric_overflow(runner):
+    chain = runner / "overflow.jsonl"
+    missing = runner / "missing.xml"
+    overflow = witness_record(
+        REPO,
+        "a" * 40,
+        "123",
+        "failure",
+        float("inf"),
+        0,
+        "3.12",
+        ts="2026-11-02T00:00:00Z",
+    )
+    # The upstream canonicalizer emits Infinity and accepts its recomputed hash.
+    assert verify_witness_chain([overflow])[0] is True
+    raw = json.dumps(overflow, sort_keys=True).replace("Infinity", "1e999")
+    assert json.loads(raw)["tests"]["passed"] == float("inf")
+    chain.write_text(raw + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="non-finite JSON number"):
+        artifact.stage_artifact(str(chain), str(missing), str(runner))
+    assert not list(runner.glob("ci-witness-artifact-*"))
+
+
 def test_stage_bounds_read_before_rejecting_oversized_chain(runner, monkeypatch):
     chain = runner / "oversized.jsonl"
     limit = 50_000_000
@@ -231,3 +307,4 @@ def test_pull_request_records_nested_chain_without_restore(runner, monkeypatch):
     assert verify_witness_chain(load_chain(str(chain)))[0]
     assert "state=EPHEMERAL\n" in output.read_text()
     assert not list(runner.glob("ci-witness-artifact-*"))
+
