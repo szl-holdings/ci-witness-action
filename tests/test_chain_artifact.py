@@ -2,7 +2,9 @@
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import zipfile
 
 import pytest
@@ -152,3 +154,25 @@ def test_action_routes_the_same_input_to_restore_record_and_stage():
     assert upload["with"]["path"] == "${{ steps.stage.outputs.directory }}"
     pin = metadata["inputs"]["witness-ref"]["default"]
     assert f"szl-ci-witness@{pin}" in (ROOT / "requirements-test.txt").read_text()
+
+
+def test_pull_request_records_nested_chain_without_restore(runner, monkeypatch):
+    """Execute the actual witness step with restoration skipped, as on PRs."""
+    chain = runner / "receipts" / "custom history.jsonl"
+    report = runner / "test-results.xml"
+    report.write_text("<testsuite><testcase/></testsuite>", encoding="utf-8")
+    output = runner / "github-output"
+    for key, value in {
+        "CHAIN": str(chain), "JUNIT": str(report),
+        "TEST_CONCLUSION": "success", "RESTORE_OUTCOME": "skipped",
+        "GITHUB_OUTPUT": str(output),
+    }.items():
+        monkeypatch.setenv(key, value)
+    metadata = yaml.safe_load((ROOT / "action.yml").read_text())
+    step = next(s for s in metadata["runs"]["steps"] if s.get("id") == "witness")
+    result = subprocess.run(["bash", "-c", step["run"]], env=os.environ.copy(),
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert verify_witness_chain(load_chain(str(chain)))[0]
+    assert "state=EPHEMERAL\n" in output.read_text()
+    assert not list(runner.glob("ci-witness-artifact-*"))
