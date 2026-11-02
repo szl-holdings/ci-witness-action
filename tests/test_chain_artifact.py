@@ -134,6 +134,61 @@ def test_stage_rejects_tampered_chain(runner):
     assert not list(runner.glob("ci-witness-artifact-*"))
 
 
+def test_stage_bounds_read_before_rejecting_oversized_chain(runner, monkeypatch):
+    chain = runner / "oversized.jsonl"
+    limit = 50_000_000
+    # A sparse file makes the test input without retaining a second large
+    # byte buffer. Measure the real file reader, not a fake decoder/verifier.
+    with chain.open("wb") as target:
+        target.truncate(limit + 32768)
+    original_open = Path.open
+    reads = []
+
+    class RecordingReader:
+        def __init__(self, reader):
+            self.reader = reader
+
+        def __enter__(self):
+            self.reader.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.reader.__exit__(*args)
+
+        def read(self, size=-1):
+            data = self.reader.read(size)
+            reads.append((size, len(data)))
+            return data
+
+    def observe_open(path, *args, **kwargs):
+        opened = original_open(path, *args, **kwargs)
+        return RecordingReader(opened) if path == chain else opened
+
+    monkeypatch.setattr(Path, "open", observe_open)
+    with pytest.raises(ValueError, match="predecessor archive limit"):
+        artifact.stage_artifact(str(chain), str(runner / "missing.xml"), str(runner))
+    assert reads == [(limit + 1, limit + 1)]
+    assert not list(runner.glob("ci-witness-artifact-*"))
+
+
+def test_stage_accepts_exact_limit_without_changing_verified_bytes(runner):
+    chain = runner / "boundary.jsonl"
+    missing = runner / "missing.xml"
+    record(chain, missing, "failure")
+    # Blank trailing JSONL whitespace preserves the valid record while
+    # exercising the actual production boundary, not a reduced test limit.
+    remaining = 50_000_000 - chain.stat().st_size
+    with chain.open("ab") as target:
+        while remaining:
+            chunk = min(remaining, 1024 * 1024)
+            target.write(b" " * chunk)
+            remaining -= chunk
+    original = chain.read_bytes()
+    assert len(original) == 50_000_000
+    staged = artifact.stage_artifact(str(chain), str(missing), str(runner))
+    assert (staged / "ci-witness.jsonl").read_bytes() == original
+
+
 def test_missing_junit_remains_an_honestly_recorded_failure(runner):
     chain = runner / "custom.jsonl"
     missing = runner / "missing.xml"

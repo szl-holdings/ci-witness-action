@@ -11,6 +11,9 @@ from szl_ci_witness.github_artifacts import restore
 from szl_ci_witness.witness import verify_witness_chain
 
 
+MAX_CHAIN_BYTES = 50_000_000
+
+
 def restore_chain(destination: str, *, fetch=None) -> dict:
     """Restore the predecessor where record-junit will append this run."""
     Path(destination).parent.mkdir(parents=True, exist_ok=True)
@@ -33,8 +36,11 @@ def stage_artifact(chain_path: str, junit_path: str, runner_temp: str) -> Path:
     A private staging directory keeps the archive member ci-witness.jsonl at
     its root even when chain-path or junit-path uses another name/directory.
     """
-    content = Path(chain_path).read_bytes()
-    if len(content) > 50_000_000:
+    # Bound the read itself; checking length after read_bytes() would already
+    # have allocated an arbitrarily large local chain before refusing it.
+    with Path(chain_path).open("rb") as source:
+        content = source.read(MAX_CHAIN_BYTES + 1)
+    if len(content) > MAX_CHAIN_BYTES:
         raise ValueError("witness chain exceeds the predecessor archive limit")
     records = [json.loads(line) for line in content.decode("utf-8").splitlines() if line.strip()]
     ok, detail = verify_witness_chain(records)
