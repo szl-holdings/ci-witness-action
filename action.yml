@@ -133,6 +133,8 @@ runs:
         if [ "$RESTORE_OUTCOME" = "failure" ]; then
           echo "::error::predecessor restore failed closed; refusing to append to an unverified chain"; exit 1
         fi
+        # PR runs skip restore, so prepare custom chain directories here too.
+        python -c 'import os; from pathlib import Path; Path(os.environ["CHAIN"]).parent.mkdir(parents=True, exist_ok=True)'
         python -m szl_ci_witness.witness record-junit --chain "$CHAIN" --junit "$JUNIT" --conclusion "$TEST_CONCLUSION"
         python -m szl_ci_witness.witness verify --chain "$CHAIN"
         python -m szl_ci_witness.witness summary --chain "$CHAIN" > witness-summary.json
