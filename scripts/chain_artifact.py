@@ -14,6 +14,31 @@ from szl_ci_witness.witness import verify_witness_chain
 MAX_CHAIN_BYTES = 50_000_000
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    decoded: dict[str, object] = {}
+    for key, value in pairs:
+        if key in decoded:
+            raise ValueError("witness chain contains duplicate JSON object keys")
+        decoded[key] = value
+    return decoded
+
+
+def _reject_nonfinite_constant(_: str) -> None:
+    raise ValueError("witness chain contains a non-finite JSON number")
+
+
+def _load_chain_records(content: bytes) -> list[dict]:
+    return [
+        json.loads(
+            line,
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_nonfinite_constant,
+        )
+        for line in content.decode("utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def restore_chain(destination: str, *, fetch=None) -> dict:
     """Restore the predecessor where record-junit will append this run."""
     Path(destination).parent.mkdir(parents=True, exist_ok=True)
@@ -42,7 +67,7 @@ def stage_artifact(chain_path: str, junit_path: str, runner_temp: str) -> Path:
         content = source.read(MAX_CHAIN_BYTES + 1)
     if len(content) > MAX_CHAIN_BYTES:
         raise ValueError("witness chain exceeds the predecessor archive limit")
-    records = [json.loads(line) for line in content.decode("utf-8").splitlines() if line.strip()]
+    records = _load_chain_records(content)
     ok, detail = verify_witness_chain(records)
     if not ok:
         raise ValueError(detail)
