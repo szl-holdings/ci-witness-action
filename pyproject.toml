@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ci-witness-action"
+version = "0.1.0"
+description = "GitHub Action: hash-chained, offline-verifiable receipts of CI runs (JUnit-measured). Failures recorded, never hidden. Wraps szl-ci-witness at a pinned commit."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "Stephen Lutar", email = "stephen@szlholdings.com" }]
+dependencies = []
+
+[project.urls]
+Homepage = "https://a11oy.net"
+Repository = "https://github.com/szl-holdings/ci-witness-action"
+
+[tool.setuptools]
+packages = []
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["build", "dist", ".venv", "node_modules"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
