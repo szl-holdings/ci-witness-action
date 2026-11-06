@@ -134,3 +134,5 @@ recorded, never hidden. Timestamps are reported, never backfilled.
 ## License
 
 Apache-2.0. Copyright 2026 SZL Holdings.
+
+Estate on Hugging Face: models, datasets and Spaces are published under the [SZLHOLDINGS](https://huggingface.co/SZLHOLDINGS) org.
