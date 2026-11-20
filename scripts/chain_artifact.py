@@ -13,6 +13,7 @@ from szl_ci_witness.witness import verify_witness_chain
 
 
 MAX_CHAIN_BYTES = 50_000_000
+MAX_JUNIT_BYTES = 50_000_000
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -81,7 +82,18 @@ def stage_artifact(chain_path: str, junit_path: str, runner_temp: str) -> Path:
     if not ok:
         raise ValueError(detail)
     report = Path(junit_path)
-    junit = report.read_bytes() if report.exists() else None
+    # The report is caller-selected input, not a trusted memory budget.
+    # Refuse linked sources, and bound the read before staging any artifact.
+    if report.is_symlink():
+        raise ValueError("JUnit report must be a regular non-symlink file")
+    junit = None
+    if report.exists():
+        if not report.is_file():
+            raise ValueError("JUnit report must be a regular file")
+        with report.open("rb") as source:
+            junit = source.read(MAX_JUNIT_BYTES + 1)
+        if len(junit) > MAX_JUNIT_BYTES:
+            raise ValueError("JUnit report exceeds the artifact size limit")
     directory = Path(tempfile.mkdtemp(prefix="ci-witness-artifact-", dir=runner_temp))
     (directory / "ci-witness.jsonl").write_bytes(content)
     # A missing JUnit report can accompany an honestly recorded failure; the
