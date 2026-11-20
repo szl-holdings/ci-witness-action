@@ -92,7 +92,10 @@ failing JUnit report fails the witness step on purpose.
 
 `chain-path` is used for both predecessor restoration and the current append.
 The uploaded artifact always contains `ci-witness.jsonl` at its root, plus
-`test-results.xml` when the report exists. These stable archive names preserve
+`test-results.xml` when the report exists. The JUnit file must be a regular,
+non-symlink file and is read with a 50 MB limit before artifact staging;
+missing reports remain permissible only under the witness's existing
+non-success result rules. These stable archive names preserve
 the pinned restore contract when working files have custom names or directories.
 An existing destination is never overwritten, and an invalid predecessor still
 fails closed before a new record can be appended.
