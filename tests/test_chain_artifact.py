@@ -265,6 +265,44 @@ def test_stage_accepts_exact_limit_without_changing_verified_bytes(runner):
     assert (staged / "ci-witness.jsonl").read_bytes() == original
 
 
+@pytest.mark.parametrize(
+    ("length", "allowed"),
+    [(128, True), (129, False)],
+    ids=["exact-junit-cap", "one-byte-over-junit-cap"],
+)
+def test_stage_bounds_junit_report_before_artifact_creation(
+    runner, monkeypatch, length, allowed
+):
+    chain = runner / "custom.jsonl"
+    missing = runner / "missing.xml"
+    record(chain, missing, "failure")
+    monkeypatch.setattr(artifact, "MAX_JUNIT_BYTES", 128)
+    report = runner / "large.xml"
+    content = b"<testsuite/>" + b" " * (length - len(b"<testsuite/>"))
+    report.write_bytes(content)
+
+    if allowed:
+        staged = artifact.stage_artifact(str(chain), str(report), str(runner))
+        assert (staged / "test-results.xml").read_bytes() == content
+        assert (staged / "ci-witness.jsonl").read_bytes() == chain.read_bytes()
+    else:
+        with pytest.raises(ValueError, match="JUnit report exceeds the artifact size limit"):
+            artifact.stage_artifact(str(chain), str(report), str(runner))
+        assert not list(runner.glob("ci-witness-artifact-*"))
+
+
+def test_stage_rejects_symlinked_junit_before_artifact_creation(runner):
+    chain = runner / "custom.jsonl"
+    record(chain, runner / "missing.xml", "failure")
+    external = runner / "external-not-junit.txt"
+    external.write_text("not a junit report", encoding="utf-8")
+    report = runner / "symlinked.xml"
+    report.symlink_to(external)
+    with pytest.raises(ValueError, match="non-symlink"):
+        artifact.stage_artifact(str(chain), str(report), str(runner))
+    assert not list(runner.glob("ci-witness-artifact-*"))
+
+
 def test_missing_junit_remains_an_honestly_recorded_failure(runner):
     chain = runner / "custom.jsonl"
     missing = runner / "missing.xml"
